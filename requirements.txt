@@ -1,0 +1,6 @@
+pydicom
+numpy
+streamlit
+imageio
+natsort
+Pillow 
