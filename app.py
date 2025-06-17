@@ -169,57 +169,82 @@ def create_dicom_zip(voxel_data, header_info):
 st.set_page_config(page_title="VOX to DICOM Converter", layout="centered")
 
 st.title("VOX to DICOM Converter")
-st.markdown("This web app converts Revvity/Rigaku `.VOX` files into a DICOM series, packaged as a `.zip` file.")
+st.markdown("This web app converts a **zipped** Revvity/Rigaku `.VOX` file into a DICOM series, packaged as a new `.zip` file.")
+st.warning("Please zip your `.VOX` file before uploading. This helps with large file transfers.")
 
-st.header("1. Upload .VOX File")
-uploaded_vox = st.file_uploader(
-    "Choose a .VOX file",
-    type="vox",
-    help="Upload the primary .VOX data file here."
+st.header("1. Upload Zipped .VOX File")
+uploaded_zip = st.file_uploader(
+    "Choose a .ZIP file containing your .VOX data",
+    type="zip",
+    help="Upload a .zip archive containing the primary .VOX data file."
 )
 
-if uploaded_vox is not None:
-    st.success(f"Successfully uploaded `{uploaded_vox.name}`.")
+if uploaded_zip is not None:
+    st.success(f"Successfully uploaded `{uploaded_zip.name}`.")
     
     st.header("2. Convert to DICOM")
     st.markdown("Click the button below to start the conversion process.")
     
     if st.button("Convert to DICOM", key="convert_button"):
-        with st.spinner("Parsing VOX file... This may take a moment."):
-            # We use an in-memory BytesIO stream to pass to the parser
-            vox_stream = io.BytesIO(uploaded_vox.getvalue())
-            voxel_data, header_info, debug_header_lines = parse_revvity_vox_from_stream(vox_stream)
+        vox_stream = None
+        original_vox_filename = None
+        
+        # --- Unzipping Logic ---
+        with st.spinner("Analyzing ZIP file..."):
+            try:
+                with zipfile.ZipFile(uploaded_zip, 'r') as zf:
+                    # Find the .vox file inside the zip (case-insensitive)
+                    vox_files_in_zip = [f for f in zf.namelist() if f.lower().endswith('.vox')]
+                    
+                    if not vox_files_in_zip:
+                        st.error("Error: No `.VOX` file found inside the uploaded ZIP archive.")
+                    elif len(vox_files_in_zip) > 1:
+                        st.error("Error: Multiple `.VOX` files found in the ZIP. Please ensure there is only one.")
+                    else:
+                        original_vox_filename = vox_files_in_zip[0]
+                        st.info(f"Found `{original_vox_filename}` inside the ZIP file. Preparing to parse...")
+                        vox_bytes = zf.read(original_vox_filename)
+                        vox_stream = io.BytesIO(vox_bytes)
 
-        if voxel_data is not None and header_info is not None:
-            st.success("VOX file parsed successfully!")
-            st.json(header_info) # Display header info
-            
-            with st.spinner("Creating DICOM files and zipping them..."):
-                zip_buffer = create_dicom_zip(voxel_data, header_info)
-            
-            st.success("DICOM series created and zipped!")
-            
-            st.header("3. Download Results")
-            st.markdown("Click the button below to download your DICOM files.")
+            except zipfile.BadZipFile:
+                st.error("Error: The uploaded file is not a valid ZIP archive.")
+            except Exception as e:
+                st.error(f"An unexpected error occurred while reading the ZIP file: {e}")
+        # --- End Unzipping ---
 
-            output_zip_name = f"{os.path.splitext(uploaded_vox.name)[0]}_dicom.zip"
-            
-            st.download_button(
-                label="Download DICOM.zip",
-                data=zip_buffer,
-                file_name=output_zip_name,
-                mime="application/zip",
-            )
-        else:
-            st.error("Failed to process the VOX file. Please check that it is a valid Revvity/Rigaku .VOX file and try again.")
-            if debug_header_lines:
-                with st.expander("Show Debugging Information"):
-                    st.warning("The parser could not find a valid header. The content it read from the file's header section is shown below. This can help diagnose if the file is corrupt or not in the expected format.")
-                    # Truncate the log for display to be safe
-                    log_display = '\\n'.join(debug_header_lines[:500])
-                    if len(debug_header_lines) > 500:
-                        log_display += "\\n... (log truncated for display)"
-                    st.code(log_display, language='text')
+        if vox_stream:
+            with st.spinner("Parsing VOX file... This may take a moment."):
+                voxel_data, header_info, debug_header_lines = parse_revvity_vox_from_stream(vox_stream)
+
+            if voxel_data is not None and header_info is not None:
+                st.success("VOX file parsed successfully!")
+                st.json(header_info)
+                
+                with st.spinner("Creating DICOM files and zipping them..."):
+                    zip_buffer = create_dicom_zip(voxel_data, header_info)
+                
+                st.success("DICOM series created and zipped!")
+                
+                st.header("3. Download Results")
+                st.markdown("Click the button below to download your DICOM files.")
+
+                output_zip_name = f"{os.path.splitext(os.path.basename(original_vox_filename))[0]}_dicom.zip"
+                
+                st.download_button(
+                    label="Download DICOM.zip",
+                    data=zip_buffer,
+                    file_name=output_zip_name,
+                    mime="application/zip",
+                )
+            else:
+                st.error("Failed to process the VOX file. Please check that it is a valid Revvity/Rigaku .VOX file and try again.")
+                if debug_header_lines:
+                    with st.expander("Show Debugging Information"):
+                        st.warning("The parser could not find a valid header. The content it read from the file's header section is shown below. This can help diagnose if the file is corrupt or not in the expected format.")
+                        log_display = '\\n'.join(debug_header_lines[:500])
+                        if len(debug_header_lines) > 500:
+                            log_display += "\\n... (log truncated for display)"
+                        st.code(log_display, language='text')
 
 st.markdown("---")
 st.info("Note: This tool is specifically for Revvity/Rigaku .VOX files. The associated .VIF file is not needed for upload, as key metadata is read from the VOX header.") 
