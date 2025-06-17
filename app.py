@@ -193,8 +193,11 @@ if uploaded_zip is not None:
         with st.spinner("Analyzing ZIP file..."):
             try:
                 with zipfile.ZipFile(uploaded_zip, 'r') as zf:
-                    # Find the .vox file inside the zip (case-insensitive)
-                    vox_files_in_zip = [f for f in zf.namelist() if f.lower().endswith('.vox')]
+                    # Find the .vox file inside the zip, ignoring hidden macOS resource fork files
+                    vox_files_in_zip = [
+                        f for f in zf.namelist() 
+                        if f.lower().endswith('.vox') and not os.path.basename(f).startswith('._')
+                    ]
                     
                     if not vox_files_in_zip:
                         st.error("Error: No `.VOX` file found inside the uploaded ZIP archive.")
